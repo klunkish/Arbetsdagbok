@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Arbetsdashboard</title>
+
+<style>
+:root {
+  --bg:#f4f6fb;
+  --card:#fff;
+  --text:#1c1f2a;
+  --muted:#6b7280;
+  --primary:#3b82f6;
+  --primary-dark:#2563eb;
+  --border:#e5e7eb;
+  --shadow:0 8px 20px rgba(0,0,0,0.06);
+}
+
+body{
+  margin:0;
+  font-family:system-ui;
+  background:var(--bg);
+  color:var(--text);
+}
+
+header{
+  background:#fff;
+  padding:12px 16px;
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  box-shadow:var(--shadow);
+  position:sticky;
+  top:0;
+}
+
+header button{
+  border:none;
+  padding:8px 12px;
+  border-radius:10px;
+  background:var(--primary);
+  color:#fff;
+  cursor:pointer;
+}
+
+.container{
+  padding:16px;
+  display:grid;
+  gap:14px;
+}
+
+.card{
+  background:var(--card);
+  border-radius:16px;
+  padding:14px;
+  box-shadow:var(--shadow);
+  border:1px solid var(--border);
+}
+
+.calendar{
+  display:grid;
+  grid-template-columns:repeat(7,1fr);
+  gap:6px;
+  margin-top:10px;
+}
+
+.day{
+  background:#f9fafb;
+  border:1px solid var(--border);
+  border-radius:10px;
+  text-align:center;
+  padding:10px;
+  cursor:pointer;
+  position:relative;
+}
+
+.day.has-log::after{
+  content:"";
+  width:6px;
+  height:6px;
+  background:#22c55e;
+  border-radius:50%;
+  position:absolute;
+  top:6px;
+  right:6px;
+}
+
+.selected{
+  outline:2px solid var(--primary);
+  background:#e0ecff;
+}
+
+button{
+  border:none;
+  cursor:pointer;
+}
+
+.primary{
+  background:var(--primary);
+  color:#fff;
+  padding:8px 12px;
+  border-radius:10px;
+}
+
+.task-btn{
+  margin:6px 6px 0 0;
+  padding:6px 10px;
+  border-radius:999px;
+  background:#eef2ff;
+}
+
+.log-item{
+  display:flex;
+  justify-content:space-between;
+  padding:10px;
+  margin:8px 0;
+  border-radius:12px;
+  background:#f9fafb;
+  border-left:4px solid var(--primary);
+  cursor:pointer;
+}
+
+.modal{
+  position:fixed;
+  inset:0;
+  background:rgba(0,0,0,0.4);
+  display:none;
+  align-items:center;
+  justify-content:center;
+}
+
+.modal-content{
+  background:#fff;
+  padding:18px;
+  border-radius:16px;
+  width:320px;
+}
+
+.modal-content input{
+  width:100%;
+  margin:6px 0;
+  padding:10px;
+  border-radius:10px;
+  border:1px solid var(--border);
+}
+
+.modal-content label{
+  font-size:12px;
+  color:#666;
+}
+</style>
+</head>
+
+<body>
+
+<header>
+  <div id="userInfo"></div>
+  <div>
+    <button id="settingsBtn">⚙️</button>
+    <button id="reportBtn">Rapport</button>
+  </div>
+</header>
+
+<div class="container">
+
+  <div class="card">
+    <button id="prevMonth">⬅</button>
+    <span id="monthLabel" style="margin:0 10px;font-weight:600;"></span>
+    <button id="nextMonth">➡</button>
+
+    <div class="calendar" id="calendar"></div>
+  </div>
+
+  <div class="card">
+    <h3>Snabbval</h3>
+    <div id="tasks"></div>
+    <button id="addTask" class="primary">+ Lägg till</button>
+  </div>
+
+  <div class="card">
+    <h3>Logg</h3>
+    <div id="selectedDateLabel"></div>
+    <div id="logs"></div>
+
+    <input id="title" placeholder="Jobb"/>
+    <input id="hours" type="number" placeholder="Timmar"/>
+    <input id="note" placeholder="Anteckning"/>
+    <button id="addLogBtn" class="primary">Lägg till</button>
+  </div>
+
+  <div class="card">
+    <h3>Statistik</h3>
+    <div id="stats"></div>
+  </div>
+
+</div>
+
+<!-- SETTINGS -->
+<div class="modal" id="settingsModal">
+  <div class="modal-content">
+    <h3>Inställningar</h3>
+    <input id="name" placeholder="Namn"/>
+    <input id="company" placeholder="Företag"/>
+    <button onclick="saveSettings()" class="primary">Spara</button>
+  </div>
+</div>
+
+<!-- EDIT -->
+<div class="modal" id="editModal">
+  <div class="modal-content">
+    <h3>Edit log</h3>
+    <input id="editTitle"/>
+    <input id="editHours" type="number"/>
+    <input id="editNote"/>
+    <button onclick="saveEdit()" class="primary">Spara</button>
+    <button onclick="deleteEdit()">Ta bort</button>
+    <button onclick="closeEdit()">Avbryt</button>
+  </div>
+</div>
+
+<!-- REPORT -->
+<div class="modal" id="reportModal">
+  <div class="modal-content">
+    <h3>Skapa rapport</h3>
+
+    <label>Från</label>
+    <input type="date" id="fromDate"/>
+
+    <label>Till</label>
+    <input type="date" id="toDate"/>
+
+    <button class="primary" onclick="generateReport()">Skapa</button>
+  </div>
+</div>
+
+<script>
+let state = {
+  selectedDate:new Date(),
+  currentMonth:new Date(),
+  tasks:[],
+  logs:{},
+  settings:{name:"",company:""}
+};
+
+let editing=null;
+
+const LS={
+  tasks:"tasks",
+  logs:"logs",
+  settings:"settings"
+};
+
+function load(){
+  state.tasks=JSON.parse(localStorage.getItem(LS.tasks))||[];
+  state.logs=JSON.parse(localStorage.getItem(LS.logs))||{};
+  state.settings=JSON.parse(localStorage.getItem(LS.settings))||state.settings;
+
+  const t=new Date();
+  const f=new Date(t.getFullYear(),t.getMonth(),1);
+
+  fromDate.value=f.toISOString().split("T")[0];
+  toDate.value=t.toISOString().split("T")[0];
+}
+
+function save(){
+  localStorage.setItem(LS.tasks,JSON.stringify(state.tasks));
+  localStorage.setItem(LS.logs,JSON.stringify(state.logs));
+  localStorage.setItem(LS.settings,JSON.stringify(state.settings));
+}
+
+const key=d=>d.toISOString().split("T")[0];
+
+function renderAll(){
+  renderCalendar();
+  renderTasks();
+  renderLogs();
+  renderStats();
+
+  userInfo.innerText=`${state.settings.name||""} ${state.settings.company||""}`;
+}
+
+/* CALENDAR */
+function renderCalendar(){
+  const el=calendar;
+  el.innerHTML="";
+
+  const y=state.currentMonth.getFullYear();
+  const m=state.currentMonth.getMonth();
+
+  monthLabel.innerText=state.currentMonth.toLocaleString("sv",{month:"long",year:"numeric"});
+
+  const last=new Date(y,m+1,0);
+
+  for(let i=1;i<=last.getDate();i++){
+    const d=new Date(y,m,i);
+    const k=key(d);
+
+    const div=document.createElement("div");
+    div.className="day";
+
+    if(k===key(state.selectedDate)) div.classList.add("selected");
+    if(state.logs[k]) div.classList.add("has-log");
+
+    div.innerText=i;
+
+    div.onclick=()=>{
+      state.selectedDate=d;
+      renderAll();
+    };
+
+    el.appendChild(div);
+  }
+}
+
+/* TASKS */
+function renderTasks(){
+  tasks.innerHTML="";
+
+  state.tasks.forEach(t=>{
+    const b=document.createElement("button");
+    b.className="task-btn";
+    b.innerText=t;
+    b.onclick=()=>addLog(t,1,"");
+    tasks.appendChild(b);
+  });
+}
+
+/* LOGS */
+function renderLogs(){
+  logs.innerHTML="";
+
+  const k=key(state.selectedDate);
+  selectedDateLabel.innerText=k;
+
+  let total=0;
+
+  (state.logs[k]||[]).forEach(l=>{
+    total+=+l.hours;
+
+    const d=document.createElement("div");
+    d.className="log-item";
+    d.innerHTML=`<span>${l.title}</span><strong>${l.hours}h</strong>`;
+    d.onclick=()=>openEdit(l.id);
+    logs.appendChild(d);
+  });
+
+  const t=document.createElement("div");
+  t.style.fontWeight="600";
+  t.innerText="Totalt: "+total+"h";
+  logs.appendChild(t);
+}
+
+/* STATS */
+function renderStats(){
+  stats.innerHTML="";
+
+  const m=state.currentMonth.getMonth();
+  const y=state.currentMonth.getFullYear();
+
+  const map={};
+
+  Object.entries(state.logs).forEach(([d,arr])=>{
+    const dt=new Date(d);
+
+    if(dt.getMonth()==m&&dt.getFullYear()==y){
+      arr.forEach(l=>{
+        map[l.title]=(map[l.title]||0)+ +l.hours;
+      });
+    }
+  });
+
+  Object.entries(map).forEach(([k,v])=>{
+    const d=document.createElement("div");
+    d.innerText=`${k}: ${v}h`;
+    stats.appendChild(d);
+  });
+}
+
+/* LOGIC */
+function addLog(t,h,n){
+  const k=key(state.selectedDate);
+
+  if(!state.logs[k]) state.logs[k]=[];
+
+  state.logs[k].push({id:Date.now(),title:t,hours:h,note:n});
+
+  save();renderAll();
+}
+
+/* EDIT */
+function openEdit(id){
+  const k=key(state.selectedDate);
+  const l=state.logs[k].find(x=>x.id===id);
+
+  editing={id,key:k};
+
+  editTitle.value=l.title;
+  editHours.value=l.hours;
+  editNote.value=l.note;
+
+  editModal.style.display="flex";
+}
+
+function saveEdit(){
+  const l=state.logs[editing.key].find(x=>x.id===editing.id);
+
+  l.title=editTitle.value;
+  l.hours=editHours.value;
+  l.note=editNote.value;
+
+  closeEdit();
+  save();renderAll();
+}
+
+function deleteEdit(){
+  state.logs[editing.key]=state.logs[editing.key].filter(x=>x.id!==editing.id);
+
+  closeEdit();
+  save();renderAll();
+}
+
+function closeEdit(){
+  editModal.style.display="none";
+  editing=null;
+}
+
+/* SETTINGS */
+function saveSettings(){
+  state.settings.name=name.value;
+  state.settings.company=company.value;
+
+  save();
+  settingsModal.style.display="none";
+  renderAll();
+}
+
+/* REPORT */
+reportBtn.onclick=()=>{
+  reportModal.style.display="flex";
+};
+
+function generateReport(){
+  const from=new Date(fromDate.value);
+  const to=new Date(toDate.value);
+
+  const w=window.open();
+
+  let html=`
+    <h1>${state.settings.company}</h1>
+    <h2>${state.settings.name}</h2>
+    <p>${fromDate.value} → ${toDate.value}</p><hr>
+  `;
+
+  let total=0;
+
+  Object.entries(state.logs).forEach(([d,arr])=>{
+    const dt=new Date(d);
+
+    if(dt>=from&&dt<=to){
+      html+=`<h3>${d}</h3>`;
+
+      arr.forEach(l=>{
+        total+=+l.hours;
+        html+=`${l.title} - ${l.hours}h<br>`;
+      });
+    }
+  });
+
+  html+=`<hr><h2>Total: ${total}h</h2>`;
+  w.document.write(html);
+  w.print();
+
+  reportModal.style.display="none";
+}
+
+/* EVENTS */
+addLogBtn.onclick=()=>addLog(title.value,hours.value,note.value);
+
+addTask.onclick=()=>{
+  const t=prompt("Snabbval");
+  if(t){state.tasks.push(t);save();renderAll();}
+};
+
+prevMonth.onclick=()=>{state.currentMonth.setMonth(state.currentMonth.getMonth()-1);renderAll();};
+nextMonth.onclick=()=>{state.currentMonth.setMonth(state.currentMonth.getMonth()+1);renderAll();};
+
+settingsBtn.onclick=()=>settingsModal.style.display="flex";
+
+load();
+renderAll();
+</script>
+
+</body>
+</html>
